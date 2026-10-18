@@ -1,1 +1,161 @@
+name: Compilar aplicativo Android
 
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar arquivos do repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Preparar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Preparar Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Aceitar licencas Android
+        run: yes | sdkmanager --licenses || true
+
+      - name: Localizar e extrair projeto
+        shell: bash
+        run: |
+          mkdir -p projeto
+
+          ZIP=$(find . -type f \
+            -iname "ControleMedicacoesAndroid_projeto_9.zip" \
+            -print -quit)
+
+          if [ -z "$ZIP" ]; then
+            ZIP=$(find . -type f -iname "*.zip" -print -quit)
+          fi
+
+          if [ -z "$ZIP" ]; then
+            echo "ERRO: Nenhum arquivo ZIP encontrado no repositorio."
+            exit 1
+          fi
+
+          echo "ZIP encontrado: $ZIP"
+          unzip -q "$ZIP" -d projeto
+
+          GRADLE_FILE=$(find projeto -type f \
+            \( -name settings.gradle \
+            -o -name settings.gradle.kts \) \
+            -print -quit)
+
+          if [ -z "$GRADLE_FILE" ]; then
+            echo "ERRO: settings.gradle nao encontrado."
+            exit 1
+          fi
+
+          PROJETO_DIR=$(dirname "$GRADLE_FILE")
+          echo "PROJETO_DIR=$PROJETO_DIR" >> "$GITHUB_ENV"
+
+      - name: Ajustar compatibilidade Java e Kotlin
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path("projeto")
+          files = list(root.rglob("build.gradle")) + \
+                  list(root.rglob("build.gradle.kts"))
+
+          for p in files:
+              text = p.read_text()
+              original = text
+
+              if p.parent.name == "app":
+                  if p.suffix == ".kts":
+                      if "compileOptions {" in text:
+                          text = re.sub(
+                              r'JavaVersion\.VERSION_1_8',
+                              'JavaVersion.VERSION_17', text)
+                      else:
+                          text += """
+          
+          android {
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+          }
+          """
+                      if "kotlinOptions {" in text:
+                          text = re.sub(
+                              r'jvmTarget\s*=\s*["\']1\.8["\']',
+                              'jvmTarget = "17"', text)
+                      else:
+                          text += """
+          
+          kotlinOptions {
+              jvmTarget = "17"
+          }
+          """
+                  else:
+                      if "compileOptions {" in text:
+                          text = re.sub(
+                              r'JavaVersion\.VERSION_1_8',
+                              'JavaVersion.VERSION_17', text)
+                      else:
+                          text += """
+          
+          android {
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          """
+                      if "kotlinOptions {" in text:
+                          text = re.sub(
+                              r'jvmTarget\s*=\s*["\']1\.8["\']',
+                              'jvmTarget = "17"', text)
+                      else:
+                          text += """
+          
+          kotlinOptions {
+              jvmTarget = "17"
+          }
+          """
+
+              if text != original:
+                  p.write_text(text)
+                  print("Ajustado:", p)
+          PY
+
+      - name: Compilar APK
+        run: gradle -p "$PROJETO_DIR" assembleDebug
+
+      - name: Localizar APK gerado
+        shell: bash
+        run: |
+          find "$PROJETO_DIR" -type f -name "*.apk" -print
+
+          APK=$(find "$PROJETO_DIR" -type f \
+            -path "*/build/outputs/apk/debug/*.apk" \
+            -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo "ERRO: APK de debug nao foi gerado."
+            exit 1
+          fi
+
+      - name: Disponibilizar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: aplicativo-android
+          path: projeto/**/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
