@@ -28,23 +28,17 @@ jobs:
         shell: bash
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-
-          if [ ! -d "$ANDROID_HOME/platform-tools" ]; then
-            echo "Instalando ferramentas Android..."
-            mkdir -p "$ANDROID_HOME"
-          fi
 
           SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \
             -type f -name sdkmanager -print 2>/dev/null \
             | sort -V | tail -n 1)
 
           if [ -z "$SDKMANAGER" ]; then
-            echo "ERRO: sdkmanager nao encontrado no ambiente."
+            echo "ERRO: sdkmanager nao encontrado."
             exit 1
           fi
 
-          echo "SDK Manager: $SDKMANAGER"
+          echo "SDK Manager encontrado: $SDKMANAGER"
           "$SDKMANAGER" --version
 
       - name: Aceitar licencas Android
@@ -79,32 +73,91 @@ jobs:
           echo "ZIP encontrado: $ZIP"
           unzip -q "$ZIP" -d projeto
 
-          GRADLE_FILE=$(find projeto -type f \
-            \( -name settings.gradle \
-            -o -name settings.gradle.kts \) \
-            -print -quit)
+          echo "Procurando arquivos do projeto..."
 
-          if [ -z "$GRADLE_FILE" ]; then
-            echo "ERRO: settings.gradle nao encontrado."
+          find projeto -maxdepth 7 -type f \
+            \( -name gradlew \
+            -o -name settings.gradle \
+            -o -name settings.gradle.kts \) -print
+
+          GRADLEW=$(find projeto -type f \
+            -name gradlew -print -quit)
+
+          if [ -z "$GRADLEW" ]; then
+            echo "ERRO: gradlew nao foi encontrado dentro do ZIP."
+            echo "Arquivos encontrados:"
+            find projeto -maxdepth 5 -type f | head -100
             exit 1
           fi
 
-          PROJETO_DIR=$(dirname "$GRADLE_FILE")
+          PROJETO_DIR=$(dirname "$GRADLEW")
+
+          if [ ! -f "$PROJETO_DIR/settings.gradle" ] && \
+             [ ! -f "$PROJETO_DIR/settings.gradle.kts" ]; then
+            echo "ERRO: settings.gradle nao encontrado junto de gradlew."
+            exit 1
+          fi
+
           echo "PROJETO_DIR=$PROJETO_DIR" >> "$GITHUB_ENV"
           echo "Projeto localizado em: $PROJETO_DIR"
 
       - name: Verificar arquivos do projeto
         shell: bash
         run: |
-          test -f "$PROJETO_DIR/gradlew" || {
+          echo "Pasta do projeto: $PROJETO_DIR"
+
+          if [ ! -f "$PROJETO_DIR/gradlew" ]; then
             echo "ERRO: gradlew nao encontrado."
             exit 1
-          }
+          fi
 
-          test -d "$PROJETO_DIR/app" || {
+          if [ ! -d "$PROJETO_DIR/app" ]; then
             echo "ERRO: pasta app nao encontrada."
+            find "$PROJETO_DIR" -maxdepth 4 -type d
             exit 1
-          }
+          fi
+
+          echo "Arquivos principais encontrados."
+
+      - name: Ajustar compatibilidade Java e Kotlin
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import os
+
+          root = Path(os.environ["PROJETO_DIR"])
+
+          files = (
+              list(root.rglob("build.gradle")) +
+              list(root.rglob("build.gradle.kts"))
+          )
+
+          for p in files:
+              text = p.read_text(encoding="utf-8")
+
+              text = re.sub(
+                  r'jvmTarget\s*=\s*"[^"]+"',
+                  'jvmTarget = "17"',
+                  text
+              )
+
+              text = re.sub(
+                  r'JavaVersion\.VERSION_1_[0-9]+',
+                  'JavaVersion.VERSION_17',
+                  text
+              )
+
+              text = re.sub(
+                  r'JavaVersion\.VERSION_[0-9]+',
+                  'JavaVersion.VERSION_17',
+                  text
+              )
+
+              p.write_text(text, encoding="utf-8")
+              print("Verificado:", p)
+          PY
 
       - name: Compilar APK
         shell: bash
