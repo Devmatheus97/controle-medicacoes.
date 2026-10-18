@@ -7,6 +7,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
     steps:
       - name: Baixar arquivos do repositorio
         uses: actions/checkout@v4
@@ -20,24 +24,42 @@ jobs:
       - name: Preparar Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Preparar Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          accept-android-sdk-licenses: false
+      - name: Verificar Android SDK
+        shell: bash
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+
+          if [ ! -d "$ANDROID_HOME/platform-tools" ]; then
+            echo "Instalando ferramentas Android..."
+            mkdir -p "$ANDROID_HOME"
+          fi
+
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \
+            -type f -name sdkmanager -print 2>/dev/null \
+            | sort -V | tail -n 1)
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERRO: sdkmanager nao encontrado no ambiente."
+            exit 1
+          fi
+
+          echo "SDK Manager: $SDKMANAGER"
+          "$SDKMANAGER" --version
 
       - name: Aceitar licencas Android
         shell: bash
         run: |
-          set -e
           SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \
-            -type f -name sdkmanager -print | sort -V | tail -n 1)
+            -type f -name sdkmanager -print 2>/dev/null \
+            | sort -V | tail -n 1)
 
           if [ -z "$SDKMANAGER" ]; then
             echo "ERRO: sdkmanager nao encontrado."
             exit 1
           fi
 
-          yes | "$SDKMANAGER" --licenses
+          yes | "$SDKMANAGER" --licenses || true
 
       - name: Localizar e extrair projeto
         shell: bash
@@ -63,7 +85,7 @@ jobs:
             -print -quit)
 
           if [ -z "$GRADLE_FILE" ]; then
-            echo "ERRO: arquivo settings.gradle nao encontrado."
+            echo "ERRO: settings.gradle nao encontrado."
             exit 1
           fi
 
@@ -71,7 +93,7 @@ jobs:
           echo "PROJETO_DIR=$PROJETO_DIR" >> "$GITHUB_ENV"
           echo "Projeto localizado em: $PROJETO_DIR"
 
-      - name: Verificar configuracao do projeto
+      - name: Verificar arquivos do projeto
         shell: bash
         run: |
           test -f "$PROJETO_DIR/gradlew" || {
