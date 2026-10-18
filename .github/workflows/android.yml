@@ -22,13 +22,22 @@ jobs:
 
       - name: Preparar Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: false
 
       - name: Aceitar licencas Android
         shell: bash
         run: |
-          set +o pipefail
-          yes | sdkmanager --licenses
-          true
+          set -e
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \
+            -type f -name sdkmanager -print | sort -V | tail -n 1)
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERRO: sdkmanager nao encontrado."
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses
 
       - name: Localizar e extrair projeto
         shell: bash
@@ -40,7 +49,7 @@ jobs:
             -print -quit)
 
           if [ -z "$ZIP" ]; then
-            echo "ERRO: ZIP novo com icone nao encontrado."
+            echo "ERRO: ZIP com icone novo nao encontrado."
             find . -type f -iname "*.zip"
             exit 1
           fi
@@ -54,7 +63,7 @@ jobs:
             -print -quit)
 
           if [ -z "$GRADLE_FILE" ]; then
-            echo "ERRO: settings.gradle nao encontrado."
+            echo "ERRO: arquivo settings.gradle nao encontrado."
             exit 1
           fi
 
@@ -62,45 +71,18 @@ jobs:
           echo "PROJETO_DIR=$PROJETO_DIR" >> "$GITHUB_ENV"
           echo "Projeto localizado em: $PROJETO_DIR"
 
-      - name: Ajustar compatibilidade Java e Kotlin
+      - name: Verificar configuracao do projeto
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          import os
+          test -f "$PROJETO_DIR/gradlew" || {
+            echo "ERRO: gradlew nao encontrado."
+            exit 1
+          }
 
-          root = Path(os.environ["PROJETO_DIR"])
-
-          files = (
-              list(root.rglob("build.gradle")) +
-              list(root.rglob("build.gradle.kts"))
-          )
-
-          for p in files:
-              text = p.read_text(encoding="utf-8")
-
-              text = re.sub(
-                  r'jvmTarget\s*=\s*"[^"]+"',
-                  'jvmTarget = "17"',
-                  text
-              )
-
-              text = re.sub(
-                  r'JavaVersion\.VERSION_1_[0-9]+',
-                  'JavaVersion.VERSION_17',
-                  text
-              )
-
-              text = re.sub(
-                  r'JavaVersion\.VERSION_[0-9]+',
-                  'JavaVersion.VERSION_17',
-                  text
-              )
-
-              p.write_text(text, encoding="utf-8")
-              print("Verificado:", p)
-          PY
+          test -d "$PROJETO_DIR/app" || {
+            echo "ERRO: pasta app nao encontrada."
+            exit 1
+          }
 
       - name: Compilar APK
         shell: bash
@@ -113,6 +95,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: aplicativo-android
-          path: |
-            ${{ env.PROJETO_DIR }}/app/build/outputs/apk/debug/*.apk
+          path: ${{ env.PROJETO_DIR }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
