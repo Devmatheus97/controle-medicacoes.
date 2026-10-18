@@ -24,7 +24,11 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Aceitar licencas Android
-        run: yes | sdkmanager --licenses || true
+        shell: bash
+        run: |
+          set +o pipefail
+          yes | sdkmanager --licenses
+          true
 
       - name: Localizar e extrair projeto
         shell: bash
@@ -37,6 +41,7 @@ jobs:
 
           if [ -z "$ZIP" ]; then
             echo "ERRO: ZIP novo com icone nao encontrado."
+            find . -type f -iname "*.zip"
             exit 1
           fi
 
@@ -67,39 +72,31 @@ jobs:
 
           root = Path(os.environ["PROJETO_DIR"])
 
-          files = list(root.rglob("build.gradle")) + \
-                  list(root.rglob("build.gradle.kts"))
+          files = (
+              list(root.rglob("build.gradle")) +
+              list(root.rglob("build.gradle.kts"))
+          )
 
           for p in files:
               text = p.read_text(encoding="utf-8")
 
-              if p.name.endswith(".kts"):
-                  text = re.sub(
-                      r'jvmTarget\s*=\s*"[^"]+"',
-                      'jvmTarget = "17"',
-                      text
-                  )
-                  text = re.sub(
-                      r'JavaVersion\.VERSION_1_[0-9]+',
-                      'JavaVersion.VERSION_17',
-                      text
-                  )
-                  text = re.sub(
-                      r'JavaVersion\.VERSION_[0-9]+',
-                      'JavaVersion.VERSION_17',
-                      text
-                  )
-              else:
-                  text = re.sub(
-                      r'JavaVersion\.VERSION_1_[0-9]+',
-                      'JavaVersion.VERSION_17',
-                      text
-                  )
-                  text = re.sub(
-                      r'JavaVersion\.VERSION_[0-9]+',
-                      'JavaVersion.VERSION_17',
-                      text
-                  )
+              text = re.sub(
+                  r'jvmTarget\s*=\s*"[^"]+"',
+                  'jvmTarget = "17"',
+                  text
+              )
+
+              text = re.sub(
+                  r'JavaVersion\.VERSION_1_[0-9]+',
+                  'JavaVersion.VERSION_17',
+                  text
+              )
+
+              text = re.sub(
+                  r'JavaVersion\.VERSION_[0-9]+',
+                  'JavaVersion.VERSION_17',
+                  text
+              )
 
               p.write_text(text, encoding="utf-8")
               print("Verificado:", p)
