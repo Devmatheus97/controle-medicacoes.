@@ -19,11 +19,9 @@ jobs:
 
       - name: Preparar Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
 
       - name: Preparar Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@v3
 
       - name: Aceitar licencas Android
         run: yes | sdkmanager --licenses || true
@@ -34,15 +32,11 @@ jobs:
           mkdir -p projeto
 
           ZIP=$(find . -type f \
-            -iname "ControleMedicacoesAndroid_projeto_9.zip" \
+            -iname "ControleMedicacoesAndroid_com_icone.zip" \
             -print -quit)
 
           if [ -z "$ZIP" ]; then
-            ZIP=$(find . -type f -iname "*.zip" -print -quit)
-          fi
-
-          if [ -z "$ZIP" ]; then
-            echo "ERRO: Nenhum arquivo ZIP encontrado no repositorio."
+            echo "ERRO: ZIP novo com icone nao encontrado."
             exit 1
           fi
 
@@ -61,6 +55,7 @@ jobs:
 
           PROJETO_DIR=$(dirname "$GRADLE_FILE")
           echo "PROJETO_DIR=$PROJETO_DIR" >> "$GITHUB_ENV"
+          echo "Projeto localizado em: $PROJETO_DIR"
 
       - name: Ajustar compatibilidade Java e Kotlin
         shell: bash
@@ -68,94 +63,59 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re
+          import os
 
-          root = Path("projeto")
+          root = Path(os.environ["PROJETO_DIR"])
+
           files = list(root.rglob("build.gradle")) + \
                   list(root.rglob("build.gradle.kts"))
 
           for p in files:
-              text = p.read_text()
-              original = text
+              text = p.read_text(encoding="utf-8")
 
-              if p.parent.name == "app":
-                  if p.suffix == ".kts":
-                      if "compileOptions {" in text:
-                          text = re.sub(
-                              r'JavaVersion\.VERSION_1_8',
-                              'JavaVersion.VERSION_17', text)
-                      else:
-                          text += """
-          
-          android {
-              compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
-          }
-          """
-                      if "kotlinOptions {" in text:
-                          text = re.sub(
-                              r'jvmTarget\s*=\s*["\']1\.8["\']',
-                              'jvmTarget = "17"', text)
-                      else:
-                          text += """
-          
-          kotlinOptions {
-              jvmTarget = "17"
-          }
-          """
-                  else:
-                      if "compileOptions {" in text:
-                          text = re.sub(
-                              r'JavaVersion\.VERSION_1_8',
-                              'JavaVersion.VERSION_17', text)
-                      else:
-                          text += """
-          
-          android {
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
-              }
-          }
-          """
-                      if "kotlinOptions {" in text:
-                          text = re.sub(
-                              r'jvmTarget\s*=\s*["\']1\.8["\']',
-                              'jvmTarget = "17"', text)
-                      else:
-                          text += """
-          
-          kotlinOptions {
-              jvmTarget = "17"
-          }
-          """
+              if p.name.endswith(".kts"):
+                  text = re.sub(
+                      r'jvmTarget\s*=\s*"[^"]+"',
+                      'jvmTarget = "17"',
+                      text
+                  )
+                  text = re.sub(
+                      r'JavaVersion\.VERSION_1_[0-9]+',
+                      'JavaVersion.VERSION_17',
+                      text
+                  )
+                  text = re.sub(
+                      r'JavaVersion\.VERSION_[0-9]+',
+                      'JavaVersion.VERSION_17',
+                      text
+                  )
+              else:
+                  text = re.sub(
+                      r'JavaVersion\.VERSION_1_[0-9]+',
+                      'JavaVersion.VERSION_17',
+                      text
+                  )
+                  text = re.sub(
+                      r'JavaVersion\.VERSION_[0-9]+',
+                      'JavaVersion.VERSION_17',
+                      text
+                  )
 
-              if text != original:
-                  p.write_text(text)
-                  print("Ajustado:", p)
+              p.write_text(text, encoding="utf-8")
+              print("Verificado:", p)
           PY
 
       - name: Compilar APK
-        run: gradle -p "$PROJETO_DIR" assembleDebug
-
-      - name: Localizar APK gerado
         shell: bash
         run: |
-          find "$PROJETO_DIR" -type f -name "*.apk" -print
-
-          APK=$(find "$PROJETO_DIR" -type f \
-            -path "*/build/outputs/apk/debug/*.apk" \
-            -print -quit)
-
-          if [ -z "$APK" ]; then
-            echo "ERRO: APK de debug nao foi gerado."
-            exit 1
-          fi
+          cd "$PROJETO_DIR"
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
 
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
         with:
           name: aplicativo-android
-          path: projeto/**/build/outputs/apk/debug/*.apk
+          path: |
+            ${{ env.PROJETO_DIR }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
