@@ -21,8 +21,10 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Preparar Gradle
+      - name: Preparar Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
 
       - name: Localizar e extrair projeto
         shell: bash
@@ -36,6 +38,7 @@ jobs:
 
           if [ -z "$ZIP" ]; then
             echo "ERRO: ZIP com icone novo nao encontrado."
+            find . -type f -iname "*.zip"
             exit 1
           fi
 
@@ -55,12 +58,12 @@ jobs:
           PROJETO_DIR=$(dirname "$SETTINGS")
 
           if [ ! -d "$PROJETO_DIR/app" ]; then
-            echo "ERRO: pasta app nao encontrada em $PROJETO_DIR"
+            echo "ERRO: pasta app nao encontrada."
             exit 1
           fi
 
           echo "PROJETO_DIR=$PROJETO_DIR" >> "$GITHUB_ENV"
-          echo "Projeto localizado em: $PROJETO_DIR"
+          echo "Projeto localizado: $PROJETO_DIR"
 
       - name: Preparar Gradle Wrapper
         shell: bash
@@ -70,24 +73,10 @@ jobs:
 
           if [ -f gradlew ]; then
             chmod +x gradlew
-            echo "Gradle Wrapper encontrado."
+            echo "Wrapper existente encontrado."
           else
-            echo "Gradle Wrapper ausente; verificando versao do projeto."
-
-            GRADLE_VERSION=$(grep -h -E \
-              'gradle-[0-9]+\.[0-9]+(\.[0-9]+)?(-[a-zA-Z0-9.-]+)?-(bin|all)\.zip' \
-              gradle/wrapper/gradle-wrapper.properties 2>/dev/null \
-              | head -1 \
-              | sed -E 's/.*gradle-([0-9]+\.[0-9]+(\.[0-9]+)?(-[a-zA-Z0-9.-]+)?)-(bin|all)\.zip.*/\1/')
-
-            if [ -z "$GRADLE_VERSION" ]; then
-              echo "ERRO: nao foi possivel descobrir a versao do Gradle."
-              echo "Envie o conteudo de gradle/wrapper/gradle-wrapper.properties."
-              exit 1
-            fi
-
-            echo "Versao do Gradle: $GRADLE_VERSION"
-            gradle wrapper --gradle-version "$GRADLE_VERSION"
+            echo "Gerando Gradle Wrapper com Gradle 8.9..."
+            gradle wrapper --gradle-version 8.9
             chmod +x gradlew
           fi
 
@@ -104,6 +93,46 @@ jobs:
           fi
 
           yes | "$SDKMANAGER" --licenses || true
+
+      - name: Ajustar compatibilidade Java e Kotlin
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import os
+
+          root = Path(os.environ["PROJETO_DIR"])
+
+          files = (
+              list(root.rglob("build.gradle")) +
+              list(root.rglob("build.gradle.kts"))
+          )
+
+          for p in files:
+              text = p.read_text(encoding="utf-8")
+
+              text = re.sub(
+                  r'jvmTarget\s*=\s*"[^"]+"',
+                  'jvmTarget = "17"',
+                  text
+              )
+
+              text = re.sub(
+                  r'JavaVersion\.VERSION_1_[0-9]+',
+                  'JavaVersion.VERSION_17',
+                  text
+              )
+
+              text = re.sub(
+                  r'JavaVersion\.VERSION_[0-9]+',
+                  'JavaVersion.VERSION_17',
+                  text
+              )
+
+              p.write_text(text, encoding="utf-8")
+              print("Verificado:", p)
+          PY
 
       - name: Compilar APK
         shell: bash
